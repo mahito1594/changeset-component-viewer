@@ -49,7 +49,7 @@ struct Types {
 }
 
 // Output structure
-#[derive(Tabled)]
+#[derive(Tabled, Debug, PartialEq)]
 struct ComponentRow {
     #[tabled(rename = "Type")]
     metadata_type: String,
@@ -92,20 +92,18 @@ fn output_table(rows: &[ComponentRow]) -> io::Result<()> {
     writeln!(io::stdout(), "{}", table)
 }
 
-fn output_csv(rows: &[ComponentRow]) -> io::Result<()> {
-    let mut stdout = io::stdout();
-    writeln!(stdout, "Type,Member")?;
+fn output_csv<W: Write>(rows: &[ComponentRow], writer: &mut W) -> io::Result<()> {
+    writeln!(writer, "Type,Member")?;
     for row in rows {
-        writeln!(stdout, "{},{}", row.metadata_type, row.member)?;
+        writeln!(writer, "{},{}", row.metadata_type, row.member)?;
     }
     Ok(())
 }
 
-fn output_tsv(rows: &[ComponentRow]) -> io::Result<()> {
-    let mut stdout = io::stdout();
-    writeln!(stdout, "Type\tMember")?;
+fn output_tsv<W: Write>(rows: &[ComponentRow], writer: &mut W) -> io::Result<()> {
+    writeln!(writer, "Type\tMember")?;
     for row in rows {
-        writeln!(stdout, "{}\t{}", row.metadata_type, row.member)?;
+        writeln!(writer, "{}\t{}", row.metadata_type, row.member)?;
     }
     Ok(())
 }
@@ -125,8 +123,8 @@ fn main() {
 
     let result = match args.format {
         OutputFormat::Table => output_table(&rows),
-        OutputFormat::Csv => output_csv(&rows),
-        OutputFormat::Tsv => output_tsv(&rows),
+        OutputFormat::Csv => output_csv(&rows, &mut io::stdout()),
+        OutputFormat::Tsv => output_tsv(&rows, &mut io::stdout()),
     };
 
     if let Err(e) = result
@@ -134,5 +132,175 @@ fn main() {
     {
         eprintln!("Error writing output: {}", e);
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper function to create Package for testing
+    fn make_package(types: Vec<(&str, Vec<&str>)>) -> Package {
+        Package {
+            types: types
+                .into_iter()
+                .map(|(name, members)| Types {
+                    name: name.to_string(),
+                    members: members.into_iter().map(|m| m.to_string()).collect(),
+                })
+                .collect(),
+        }
+    }
+
+    // ==================== flatten_components tests ====================
+
+    #[test]
+    fn flatten_empty_package() {
+        let package = make_package(vec![]);
+        let rows = flatten_components(&package, &SortOrder::ByType);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn flatten_empty_types() {
+        let package = make_package(vec![("ApexClass", vec![])]);
+        let rows = flatten_components(&package, &SortOrder::ByType);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn flatten_single_type_single_member() {
+        let package = make_package(vec![("ApexClass", vec!["MyClass"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0],
+            ComponentRow {
+                metadata_type: "ApexClass".to_string(),
+                member: "MyClass".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn flatten_single_type_multiple_members() {
+        let package = make_package(vec![("ApexClass", vec!["ClassA", "ClassB", "ClassC"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].member, "ClassA");
+        assert_eq!(rows[1].member, "ClassB");
+        assert_eq!(rows[2].member, "ClassC");
+    }
+
+    #[test]
+    fn flatten_multiple_types_multiple_members() {
+        let package = make_package(vec![
+            ("ApexClass", vec!["ClassA"]),
+            ("ApexTrigger", vec!["TriggerA", "TriggerB"]),
+        ]);
+        let rows = flatten_components(&package, &SortOrder::AsIs);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].metadata_type, "ApexClass");
+        assert_eq!(rows[1].metadata_type, "ApexTrigger");
+        assert_eq!(rows[2].metadata_type, "ApexTrigger");
+    }
+
+    #[test]
+    fn flatten_by_type_sorts_types_alphabetically() {
+        let package = make_package(vec![
+            ("CustomObject", vec!["Account"]),
+            ("ApexClass", vec!["MyClass"]),
+        ]);
+        let rows = flatten_components(&package, &SortOrder::ByType);
+        assert_eq!(rows[0].metadata_type, "ApexClass");
+        assert_eq!(rows[1].metadata_type, "CustomObject");
+    }
+
+    #[test]
+    fn flatten_as_is_preserves_order() {
+        let package = make_package(vec![
+            ("CustomObject", vec!["Account"]),
+            ("ApexClass", vec!["MyClass"]),
+        ]);
+        let rows = flatten_components(&package, &SortOrder::AsIs);
+        assert_eq!(rows[0].metadata_type, "CustomObject");
+        assert_eq!(rows[1].metadata_type, "ApexClass");
+    }
+
+    #[test]
+    fn flatten_by_type_sorts_members_within_type() {
+        let package = make_package(vec![("ApexClass", vec!["Zebra", "Alpha", "Middle"])]);
+        let rows = flatten_components(&package, &SortOrder::ByType);
+        assert_eq!(rows[0].member, "Alpha");
+        assert_eq!(rows[1].member, "Middle");
+        assert_eq!(rows[2].member, "Zebra");
+    }
+
+    // ==================== output_csv tests ====================
+
+    #[test]
+    fn output_csv_empty_rows() {
+        let rows: Vec<ComponentRow> = vec![];
+        let mut buffer = Vec::new();
+        output_csv(&rows, &mut buffer).unwrap();
+        assert_eq!(String::from_utf8(buffer).unwrap(), "Type,Member\n");
+    }
+
+    #[test]
+    fn output_csv_single_row() {
+        let rows = vec![ComponentRow {
+            metadata_type: "ApexClass".to_string(),
+            member: "MyClass".to_string(),
+        }];
+        let mut buffer = Vec::new();
+        output_csv(&rows, &mut buffer).unwrap();
+        assert_eq!(
+            String::from_utf8(buffer).unwrap(),
+            "Type,Member\nApexClass,MyClass\n"
+        );
+    }
+
+    #[test]
+    fn output_csv_multiple_rows() {
+        let rows = vec![
+            ComponentRow {
+                metadata_type: "ApexClass".to_string(),
+                member: "ClassA".to_string(),
+            },
+            ComponentRow {
+                metadata_type: "ApexTrigger".to_string(),
+                member: "TriggerA".to_string(),
+            },
+        ];
+        let mut buffer = Vec::new();
+        output_csv(&rows, &mut buffer).unwrap();
+        assert_eq!(
+            String::from_utf8(buffer).unwrap(),
+            "Type,Member\nApexClass,ClassA\nApexTrigger,TriggerA\n"
+        );
+    }
+
+    // ==================== output_tsv tests ====================
+
+    #[test]
+    fn output_tsv_empty_rows() {
+        let rows: Vec<ComponentRow> = vec![];
+        let mut buffer = Vec::new();
+        output_tsv(&rows, &mut buffer).unwrap();
+        assert_eq!(String::from_utf8(buffer).unwrap(), "Type\tMember\n");
+    }
+
+    #[test]
+    fn output_tsv_single_row() {
+        let rows = vec![ComponentRow {
+            metadata_type: "ApexClass".to_string(),
+            member: "MyClass".to_string(),
+        }];
+        let mut buffer = Vec::new();
+        output_tsv(&rows, &mut buffer).unwrap();
+        assert_eq!(
+            String::from_utf8(buffer).unwrap(),
+            "Type\tMember\nApexClass\tMyClass\n"
+        );
     }
 }
