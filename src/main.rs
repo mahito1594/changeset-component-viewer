@@ -86,25 +86,40 @@ fn flatten_components(package: &Package, sort_order: &SortOrder) -> Vec<Componen
     rows
 }
 
-fn output_table(rows: &[ComponentRow]) -> io::Result<()> {
+fn output_table(rows: &[ComponentRow]) -> Result<(), Box<dyn std::error::Error>> {
     let mut table = Table::new(rows);
     table.with(Style::modern());
-    writeln!(io::stdout(), "{}", table)
-}
-
-fn output_csv<W: Write>(rows: &[ComponentRow], writer: &mut W) -> io::Result<()> {
-    writeln!(writer, "Type,Member")?;
-    for row in rows {
-        writeln!(writer, "{},{}", row.metadata_type, row.member)?;
-    }
+    writeln!(io::stdout(), "{}", table)?;
     Ok(())
 }
 
-fn output_tsv<W: Write>(rows: &[ComponentRow], writer: &mut W) -> io::Result<()> {
-    writeln!(writer, "Type\tMember")?;
+fn output_csv<W: Write>(
+    rows: &[ComponentRow],
+    writer: W,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut wtr = csv::Writer::from_writer(writer);
+    // Always write header, even if rows is empty
+    wtr.write_record(["Type", "Member"])?;
     for row in rows {
-        writeln!(writer, "{}\t{}", row.metadata_type, row.member)?;
+        wtr.write_record([&row.metadata_type, &row.member])?;
     }
+    wtr.flush()?;
+    Ok(())
+}
+
+fn output_tsv<W: Write>(
+    rows: &[ComponentRow],
+    writer: W,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut wtr = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(writer);
+    // Always write header, even if rows is empty
+    wtr.write_record(["Type", "Member"])?;
+    for row in rows {
+        wtr.write_record([&row.metadata_type, &row.member])?;
+    }
+    wtr.flush()?;
     Ok(())
 }
 
@@ -123,13 +138,17 @@ fn main() {
 
     let result = match args.format {
         OutputFormat::Table => output_table(&rows),
-        OutputFormat::Csv => output_csv(&rows, &mut io::stdout()),
-        OutputFormat::Tsv => output_tsv(&rows, &mut io::stdout()),
+        OutputFormat::Csv => output_csv(&rows, io::stdout()),
+        OutputFormat::Tsv => output_tsv(&rows, io::stdout()),
     };
 
-    if let Err(e) = result
-        && e.kind() != io::ErrorKind::BrokenPipe
-    {
+    if let Err(e) = result {
+        // Check if it's a broken pipe error
+        if let Some(io_err) = e.downcast_ref::<io::Error>()
+            && io_err.kind() == io::ErrorKind::BrokenPipe
+        {
+            return;
+        }
         eprintln!("Error writing output: {}", e);
         std::process::exit(1);
     }

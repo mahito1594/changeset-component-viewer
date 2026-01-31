@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.56", features = ["derive"] }
+csv = "1.4"
 quick-xml = { version = "0.39.0", features = ["serde", "serialize"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tabled = "0.20.0"
