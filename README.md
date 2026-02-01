@@ -20,7 +20,11 @@ A CLI tool that parses Salesforce `package.xml` files and displays metadata comp
 
 ## Installation
 
-### Use `cargo install`
+### Option 1: Download prebuilt binary
+
+If you use Windows or Apple Silicon macOS, prebuilt binaries are available; download them from [GitHub Releases](https://github.com/mahito1594/changeset-component-viewer/releases).
+
+### Option 2: Use `cargo install`
 
 ```bash
 cargo install --git https://github.com/mahito1594/changeset-component-viewer
