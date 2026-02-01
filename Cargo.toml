@@ -2,6 +2,7 @@
 name = "csc-view"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85.0"
 repository = "https://github.com/mahito1594/changeset-component-viewer"
 license = "Unlicense"
 
@@ -11,3 +12,8 @@ csv = "1.4"
 quick-xml = { version = "0.39.0", features = ["serde", "serialize"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tabled = "0.20.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
