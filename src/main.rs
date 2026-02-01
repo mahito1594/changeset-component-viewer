@@ -70,7 +70,7 @@ fn parse_package_xml(path: &PathBuf) -> Result<Package, Box<dyn std::error::Erro
 }
 
 /// Types whose members should be split on the first `.` into Parent and Member columns
-const SPLITTABLE_TYPES: &[&str] = &[
+const SPLITTABLE_BY_DOT: &[&str] = &[
     "AssignmentRule",
     "CustomField",
     "ListView",
@@ -79,6 +79,9 @@ const SPLITTABLE_TYPES: &[&str] = &[
     "SharingOwnerRule",
     "SharingTerritoryRule",
 ];
+
+/// Types whose members should be split on the first `-` into Parent and Member columns
+const SPLITTABLE_BY_HYPHEN: &[&str] = &["Layout"];
 
 fn flatten_components(
     package: &Package,
@@ -91,8 +94,13 @@ fn flatten_components(
         .flat_map(|t| {
             t.members.iter().map(|m| {
                 let (parent, member) =
-                    if split_parent && SPLITTABLE_TYPES.contains(&t.name.as_str()) {
+                    if split_parent && SPLITTABLE_BY_DOT.contains(&t.name.as_str()) {
                         match m.split_once('.') {
+                            Some((p, rest)) => (p.to_string(), rest.to_string()),
+                            None => (String::new(), m.clone()),
+                        }
+                    } else if split_parent && SPLITTABLE_BY_HYPHEN.contains(&t.name.as_str()) {
+                        match m.split_once('-') {
                             Some((p, rest)) => (p.to_string(), rest.to_string()),
                             None => (String::new(), m.clone()),
                         }
@@ -427,6 +435,14 @@ mod tests {
                 row.metadata_type
             );
         }
+    }
+
+    #[test]
+    fn flatten_splits_parent_for_layout_by_hyphen() {
+        let package = make_package(vec![("Layout", vec!["Account-Account Layout"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs, true);
+        assert_eq!(rows[0].parent, "Account");
+        assert_eq!(rows[0].member, "Account Layout");
     }
 
     #[test]
