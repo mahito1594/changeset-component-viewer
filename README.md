@@ -14,6 +14,7 @@ A CLI tool that parses Salesforce `package.xml` files and displays metadata comp
 ## Features
 
 - Lists metadata types and members from `package.xml`
+- Splits `Parent.Member` format into separate columns for specific types (CustomField, RecordType, etc.)
 - Multiple output formats (table, CSV, TSV)
 - Customizable sort order (by type or preserve original order)
 
@@ -43,6 +44,7 @@ csc-view <PATH> [OPTIONS]
 |--------|-------------|---------|
 | `-f, --format <FORMAT>` | Output format (`table`, `csv`, `tsv`) | `table` |
 | `-s, --sort <SORT>` | Sort order (`by-type`, `as-is`) | `by-type` |
+| `--no-split-parent` | Disable splitting `Parent.Member` format into separate columns | `false` |
 | `-h, --help` | Print help | - |
 | `-V, --version` | Print version | - |
 
@@ -57,14 +59,38 @@ csc-view path/to/package.xml
 Output:
 
 ```
-┌──────────────┬─────────────────┐
-│ Type         │ Member          │
-├──────────────┼─────────────────┤
-│ ApexClass    │ AccountHandler  │
-│ ApexClass    │ ContactService  │
-│ ApexTrigger  │ AccountTrigger  │
-│ CustomObject │ MyObject__c     │
-└──────────────┴─────────────────┘
+┌──────────────┬─────────┬─────────────────────┐
+│ Type         │ Parent  │ Member              │
+├──────────────┼─────────┼─────────────────────┤
+│ ApexClass    │         │ AccountHandler      │
+│ ApexClass    │         │ ContactService      │
+│ ApexTrigger  │         │ AccountTrigger      │
+│ CustomField  │ Account │ Active__c           │
+│ CustomField  │ Account │ CustomerPriority__c │
+│ CustomObject │         │ MyObject__c         │
+│ RecordType   │ Account │ Business            │
+└──────────────┴─────────┴─────────────────────┘
+```
+
+For specific metadata types (CustomField, RecordType, ListView, AssignmentRule, etc.), the member value is automatically split into Parent and Member columns.
+
+#### Disable parent splitting
+
+```bash
+csc-view path/to/package.xml --no-split-parent
+```
+
+Output:
+
+```
+┌──────────────┬────────┬─────────────────────────────┐
+│ Type         │ Parent │ Member                      │
+├──────────────┼────────┼─────────────────────────────┤
+│ ApexClass    │        │ AccountHandler              │
+│ CustomField  │        │ Account.Active__c           │
+│ CustomField  │        │ Account.CustomerPriority__c │
+│ RecordType   │        │ Account.Business            │
+└──────────────┴────────┴─────────────────────────────┘
 ```
 
 #### Output as CSV
@@ -76,11 +102,14 @@ csc-view path/to/package.xml -f csv
 Output:
 
 ```
-Type,Member
-ApexClass,AccountHandler
-ApexClass,ContactService
-ApexTrigger,AccountTrigger
-CustomObject,MyObject__c
+Type,Parent,Member
+ApexClass,,AccountHandler
+ApexClass,,ContactService
+ApexTrigger,,AccountTrigger
+CustomField,Account,Active__c
+CustomField,Account,CustomerPriority__c
+CustomObject,,MyObject__c
+RecordType,Account,Business
 ```
 
 #### Output as TSV

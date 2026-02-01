@@ -19,6 +19,10 @@ struct Cli {
     /// Sort order
     #[arg(short, long, value_enum, default_value_t = SortOrder::ByType)]
     sort: SortOrder,
+
+    /// Disable splitting Parent.Member format into separate columns
+    #[arg(long, default_value_t = false)]
+    no_split_parent: bool,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -53,6 +57,8 @@ struct Types {
 struct ComponentRow {
     #[tabled(rename = "Type")]
     metadata_type: String,
+    #[tabled(rename = "Parent")]
+    parent: String,
     #[tabled(rename = "Member")]
     member: String,
 }
@@ -63,14 +69,42 @@ fn parse_package_xml(path: &PathBuf) -> Result<Package, Box<dyn std::error::Erro
     Ok(package)
 }
 
-fn flatten_components(package: &Package, sort_order: &SortOrder) -> Vec<ComponentRow> {
+/// Types whose members should be split on the first `.` into Parent and Member columns
+const SPLITTABLE_TYPES: &[&str] = &[
+    "AssignmentRule",
+    "CustomField",
+    "ListView",
+    "RecordType",
+    "SharingCriteriaRule",
+    "SharingOwnerRule",
+    "SharingTerritoryRule",
+];
+
+fn flatten_components(
+    package: &Package,
+    sort_order: &SortOrder,
+    split_parent: bool,
+) -> Vec<ComponentRow> {
     let mut rows: Vec<ComponentRow> = package
         .types
         .iter()
         .flat_map(|t| {
-            t.members.iter().map(|m| ComponentRow {
-                metadata_type: t.name.clone(),
-                member: m.clone(),
+            t.members.iter().map(|m| {
+                let (parent, member) =
+                    if split_parent && SPLITTABLE_TYPES.contains(&t.name.as_str()) {
+                        match m.split_once('.') {
+                            Some((p, rest)) => (p.to_string(), rest.to_string()),
+                            None => (String::new(), m.clone()),
+                        }
+                    } else {
+                        (String::new(), m.clone())
+                    };
+
+                ComponentRow {
+                    metadata_type: t.name.clone(),
+                    parent,
+                    member,
+                }
             })
         })
         .collect();
@@ -79,6 +113,7 @@ fn flatten_components(package: &Package, sort_order: &SortOrder) -> Vec<Componen
         rows.sort_by(|a, b| {
             a.metadata_type
                 .cmp(&b.metadata_type)
+                .then_with(|| a.parent.cmp(&b.parent))
                 .then_with(|| a.member.cmp(&b.member))
         });
     }
@@ -99,9 +134,9 @@ fn output_csv<W: Write>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut wtr = csv::Writer::from_writer(writer);
     // Always write header, even if rows is empty
-    wtr.write_record(["Type", "Member"])?;
+    wtr.write_record(["Type", "Parent", "Member"])?;
     for row in rows {
-        wtr.write_record([&row.metadata_type, &row.member])?;
+        wtr.write_record([&row.metadata_type, &row.parent, &row.member])?;
     }
     wtr.flush()?;
     Ok(())
@@ -115,9 +150,9 @@ fn output_tsv<W: Write>(
         .delimiter(b'\t')
         .from_writer(writer);
     // Always write header, even if rows is empty
-    wtr.write_record(["Type", "Member"])?;
+    wtr.write_record(["Type", "Parent", "Member"])?;
     for row in rows {
-        wtr.write_record([&row.metadata_type, &row.member])?;
+        wtr.write_record([&row.metadata_type, &row.parent, &row.member])?;
     }
     wtr.flush()?;
     Ok(())
@@ -134,7 +169,7 @@ fn main() {
         }
     };
 
-    let rows = flatten_components(&package, &args.sort);
+    let rows = flatten_components(&package, &args.sort, !args.no_split_parent);
 
     let result = match args.format {
         OutputFormat::Table => output_table(&rows),
@@ -176,26 +211,27 @@ mod tests {
     #[test]
     fn flatten_empty_package() {
         let package = make_package(vec![]);
-        let rows = flatten_components(&package, &SortOrder::ByType);
+        let rows = flatten_components(&package, &SortOrder::ByType, false);
         assert!(rows.is_empty());
     }
 
     #[test]
     fn flatten_empty_types() {
         let package = make_package(vec![("ApexClass", vec![])]);
-        let rows = flatten_components(&package, &SortOrder::ByType);
+        let rows = flatten_components(&package, &SortOrder::ByType, false);
         assert!(rows.is_empty());
     }
 
     #[test]
     fn flatten_single_type_single_member() {
         let package = make_package(vec![("ApexClass", vec!["MyClass"])]);
-        let rows = flatten_components(&package, &SortOrder::AsIs);
+        let rows = flatten_components(&package, &SortOrder::AsIs, false);
         assert_eq!(rows.len(), 1);
         assert_eq!(
             rows[0],
             ComponentRow {
                 metadata_type: "ApexClass".to_string(),
+                parent: String::new(),
                 member: "MyClass".to_string(),
             }
         );
@@ -204,7 +240,7 @@ mod tests {
     #[test]
     fn flatten_single_type_multiple_members() {
         let package = make_package(vec![("ApexClass", vec!["ClassA", "ClassB", "ClassC"])]);
-        let rows = flatten_components(&package, &SortOrder::AsIs);
+        let rows = flatten_components(&package, &SortOrder::AsIs, false);
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].member, "ClassA");
         assert_eq!(rows[1].member, "ClassB");
@@ -217,7 +253,7 @@ mod tests {
             ("ApexClass", vec!["ClassA"]),
             ("ApexTrigger", vec!["TriggerA", "TriggerB"]),
         ]);
-        let rows = flatten_components(&package, &SortOrder::AsIs);
+        let rows = flatten_components(&package, &SortOrder::AsIs, false);
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].metadata_type, "ApexClass");
         assert_eq!(rows[1].metadata_type, "ApexTrigger");
@@ -230,7 +266,7 @@ mod tests {
             ("CustomObject", vec!["Account"]),
             ("ApexClass", vec!["MyClass"]),
         ]);
-        let rows = flatten_components(&package, &SortOrder::ByType);
+        let rows = flatten_components(&package, &SortOrder::ByType, false);
         assert_eq!(rows[0].metadata_type, "ApexClass");
         assert_eq!(rows[1].metadata_type, "CustomObject");
     }
@@ -241,7 +277,7 @@ mod tests {
             ("CustomObject", vec!["Account"]),
             ("ApexClass", vec!["MyClass"]),
         ]);
-        let rows = flatten_components(&package, &SortOrder::AsIs);
+        let rows = flatten_components(&package, &SortOrder::AsIs, false);
         assert_eq!(rows[0].metadata_type, "CustomObject");
         assert_eq!(rows[1].metadata_type, "ApexClass");
     }
@@ -249,7 +285,7 @@ mod tests {
     #[test]
     fn flatten_by_type_sorts_members_within_type() {
         let package = make_package(vec![("ApexClass", vec!["Zebra", "Alpha", "Middle"])]);
-        let rows = flatten_components(&package, &SortOrder::ByType);
+        let rows = flatten_components(&package, &SortOrder::ByType, false);
         assert_eq!(rows[0].member, "Alpha");
         assert_eq!(rows[1].member, "Middle");
         assert_eq!(rows[2].member, "Zebra");
@@ -262,20 +298,21 @@ mod tests {
         let rows: Vec<ComponentRow> = vec![];
         let mut buffer = Vec::new();
         output_csv(&rows, &mut buffer).unwrap();
-        assert_eq!(String::from_utf8(buffer).unwrap(), "Type,Member\n");
+        assert_eq!(String::from_utf8(buffer).unwrap(), "Type,Parent,Member\n");
     }
 
     #[test]
     fn output_csv_single_row() {
         let rows = vec![ComponentRow {
             metadata_type: "ApexClass".to_string(),
+            parent: String::new(),
             member: "MyClass".to_string(),
         }];
         let mut buffer = Vec::new();
         output_csv(&rows, &mut buffer).unwrap();
         assert_eq!(
             String::from_utf8(buffer).unwrap(),
-            "Type,Member\nApexClass,MyClass\n"
+            "Type,Parent,Member\nApexClass,,MyClass\n"
         );
     }
 
@@ -284,10 +321,12 @@ mod tests {
         let rows = vec![
             ComponentRow {
                 metadata_type: "ApexClass".to_string(),
+                parent: String::new(),
                 member: "ClassA".to_string(),
             },
             ComponentRow {
                 metadata_type: "ApexTrigger".to_string(),
+                parent: String::new(),
                 member: "TriggerA".to_string(),
             },
         ];
@@ -295,7 +334,7 @@ mod tests {
         output_csv(&rows, &mut buffer).unwrap();
         assert_eq!(
             String::from_utf8(buffer).unwrap(),
-            "Type,Member\nApexClass,ClassA\nApexTrigger,TriggerA\n"
+            "Type,Parent,Member\nApexClass,,ClassA\nApexTrigger,,TriggerA\n"
         );
     }
 
@@ -306,20 +345,110 @@ mod tests {
         let rows: Vec<ComponentRow> = vec![];
         let mut buffer = Vec::new();
         output_tsv(&rows, &mut buffer).unwrap();
-        assert_eq!(String::from_utf8(buffer).unwrap(), "Type\tMember\n");
+        assert_eq!(String::from_utf8(buffer).unwrap(), "Type\tParent\tMember\n");
     }
 
     #[test]
     fn output_tsv_single_row() {
         let rows = vec![ComponentRow {
             metadata_type: "ApexClass".to_string(),
+            parent: String::new(),
             member: "MyClass".to_string(),
         }];
         let mut buffer = Vec::new();
         output_tsv(&rows, &mut buffer).unwrap();
         assert_eq!(
             String::from_utf8(buffer).unwrap(),
-            "Type\tMember\nApexClass\tMyClass\n"
+            "Type\tParent\tMember\nApexClass\t\tMyClass\n"
+        );
+    }
+
+    // ==================== split_parent tests ====================
+
+    #[test]
+    fn flatten_splits_parent_for_custom_field() {
+        let package = make_package(vec![("CustomField", vec!["Account.Active__c"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs, true);
+        assert_eq!(rows[0].parent, "Account");
+        assert_eq!(rows[0].member, "Active__c");
+    }
+
+    #[test]
+    fn flatten_splits_parent_for_record_type() {
+        let package = make_package(vec![("RecordType", vec!["Metric.Completion"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs, true);
+        assert_eq!(rows[0].parent, "Metric");
+        assert_eq!(rows[0].member, "Completion");
+    }
+
+    #[test]
+    fn flatten_splits_only_first_dot() {
+        // Account.Sub.Field__c → Parent: "Account", Member: "Sub.Field__c"
+        let package = make_package(vec![("CustomField", vec!["Account.Sub.Field__c"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs, true);
+        assert_eq!(rows[0].parent, "Account");
+        assert_eq!(rows[0].member, "Sub.Field__c");
+    }
+
+    #[test]
+    fn flatten_no_split_when_disabled() {
+        let package = make_package(vec![("CustomField", vec!["Account.Active__c"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs, false);
+        assert_eq!(rows[0].parent, "");
+        assert_eq!(rows[0].member, "Account.Active__c");
+    }
+
+    #[test]
+    fn flatten_no_split_for_non_splittable_type() {
+        let package = make_package(vec![("ApexClass", vec!["MyClass.Inner"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs, true);
+        assert_eq!(rows[0].parent, "");
+        assert_eq!(rows[0].member, "MyClass.Inner");
+    }
+
+    #[test]
+    fn flatten_splits_all_splittable_types() {
+        let package = make_package(vec![
+            ("AssignmentRule", vec!["Case.My_Rule"]),
+            ("CustomField", vec!["Account.Active__c"]),
+            ("ListView", vec!["Contact.All_Contacts"]),
+            ("RecordType", vec!["Metric.Completion"]),
+            ("SharingCriteriaRule", vec!["Account.Share_Rule"]),
+            ("SharingOwnerRule", vec!["Lead.Owner_Rule"]),
+            ("SharingTerritoryRule", vec!["Account.Territory_Rule"]),
+        ]);
+        let rows = flatten_components(&package, &SortOrder::AsIs, true);
+
+        // All splittable types should have parent populated
+        for row in &rows {
+            assert!(
+                !row.parent.is_empty(),
+                "Type {} should have parent",
+                row.metadata_type
+            );
+        }
+    }
+
+    #[test]
+    fn flatten_no_dot_in_member_keeps_empty_parent() {
+        let package = make_package(vec![("CustomField", vec!["SomeField"])]);
+        let rows = flatten_components(&package, &SortOrder::AsIs, true);
+        assert_eq!(rows[0].parent, "");
+        assert_eq!(rows[0].member, "SomeField");
+    }
+
+    #[test]
+    fn output_csv_with_parent_column() {
+        let rows = vec![ComponentRow {
+            metadata_type: "CustomField".to_string(),
+            parent: "Account".to_string(),
+            member: "Active__c".to_string(),
+        }];
+        let mut buffer = Vec::new();
+        output_csv(&rows, &mut buffer).unwrap();
+        assert_eq!(
+            String::from_utf8(buffer).unwrap(),
+            "Type,Parent,Member\nCustomField,Account,Active__c\n"
         );
     }
 }
