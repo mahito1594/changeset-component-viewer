@@ -5,6 +5,8 @@ edition = "2024"
 rust-version = "1.85.0"
 repository = "https://github.com/mahito1594/changeset-component-viewer"
 license = "Unlicense"
+description = "Salesforce package.xml viewer - displays metadata components in readable formats"
+homepage = "https://github.com/mahito1594/changeset-component-viewer"
 
 [dependencies]
 clap = { version = "4.5.56", features = ["derive"] }
