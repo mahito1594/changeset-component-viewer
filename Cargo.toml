@@ -1,6 +1,6 @@
 [package]
 name = "csc-view"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85.0"
 repository = "https://github.com/mahito1594/changeset-component-viewer"
@@ -17,3 +17,7 @@ tabled = "0.20.0"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[dev-dependencies]
+assert_cmd = "2.1.2"
+predicates = "3.1.3"
