@@ -129,10 +129,13 @@ fn flatten_components(
     rows
 }
 
-fn output_table(rows: &[ComponentRow]) -> Result<(), Box<dyn std::error::Error>> {
+fn output_table<W: Write>(
+    rows: &[ComponentRow],
+    mut writer: W,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut table = Table::new(rows);
     table.with(Style::modern());
-    writeln!(io::stdout(), "{}", table)?;
+    writeln!(writer, "{}", table)?;
     Ok(())
 }
 
@@ -180,7 +183,7 @@ fn main() {
     let rows = flatten_components(&package, &args.sort, !args.no_split_parent);
 
     let result = match args.format {
-        OutputFormat::Table => output_table(&rows),
+        OutputFormat::Table => output_table(&rows, io::stdout()),
         OutputFormat::Csv => output_csv(&rows, io::stdout()),
         OutputFormat::Tsv => output_tsv(&rows, io::stdout()),
     };
@@ -297,6 +300,48 @@ mod tests {
         assert_eq!(rows[0].member, "Alpha");
         assert_eq!(rows[1].member, "Middle");
         assert_eq!(rows[2].member, "Zebra");
+    }
+
+    // ==================== output_table tests ====================
+
+    #[test]
+    fn output_table_empty_rows() {
+        let rows: Vec<ComponentRow> = vec![];
+        let mut buffer = Vec::new();
+        output_table(&rows, &mut buffer).unwrap();
+        let out = String::from_utf8(buffer).unwrap();
+        assert!(out.contains("Type"));
+        assert!(out.contains("Parent"));
+        assert!(out.contains("Member"));
+    }
+
+    #[test]
+    fn output_table_single_row() {
+        let rows = vec![ComponentRow {
+            metadata_type: "ApexClass".to_string(),
+            parent: String::new(),
+            member: "MyClass".to_string(),
+        }];
+        let mut buffer = Vec::new();
+        output_table(&rows, &mut buffer).unwrap();
+        let out = String::from_utf8(buffer).unwrap();
+        assert!(out.contains("ApexClass"));
+        assert!(out.contains("MyClass"));
+    }
+
+    #[test]
+    fn output_table_with_parent_column() {
+        let rows = vec![ComponentRow {
+            metadata_type: "CustomField".to_string(),
+            parent: "Account".to_string(),
+            member: "Active__c".to_string(),
+        }];
+        let mut buffer = Vec::new();
+        output_table(&rows, &mut buffer).unwrap();
+        let out = String::from_utf8(buffer).unwrap();
+        assert!(out.contains("CustomField"));
+        assert!(out.contains("Account"));
+        assert!(out.contains("Active__c"));
     }
 
     // ==================== output_csv tests ====================
