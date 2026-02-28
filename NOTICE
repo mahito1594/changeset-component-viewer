@@ -1,0 +1,7 @@
+(Apache-2.0 OR MIT) AND Unicode-3.0 (1): unicode-ident
+Apache-2.0 (1): normalize-line-endings
+Apache-2.0 OR BSL-1.0 (1): ryu
+Apache-2.0 OR MIT (40): anstream, anstyle, anstyle-parse, anstyle-query, anstyle-wincon, assert_cmd, autocfg, bstr, bytecount, clap, clap_builder, clap_derive, clap_lex, colorchoice, fnv, heck, is_terminal_polyfill, itoa, libc, num-traits, once_cell_polyfill, predicates, predicates-core, predicates-tree, proc-macro-error-attr2, proc-macro-error2, proc-macro2, quote, regex, regex-automata, regex-syntax, serde, serde_core, serde_derive, syn, unicode-width, utf8parse, wait-timeout, windows-link, windows-sys
+MIT (9): difflib, float-cmp, papergrid, quick-xml, strsim, tabled, tabled_derive, termtree, testing_table
+MIT OR Unlicense (4): aho-corasick, csv, csv-core, memchr
+Unlicense (1): csc-view
